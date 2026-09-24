@@ -43,6 +43,8 @@ EXCLUDE_FIELDS: dict = {
         "__all__": {
             "multi_modal_data",
             "routed_experts",
+            "sampler_head_ids",
+            "sampler_head_logprobs",
             "kept_tokens",
         }
     }
@@ -200,6 +202,28 @@ class Branch(StrictBaseModel):
         for node in self.nodes:
             mask.extend(node.mask)
         return mask
+
+    def _sampler_head_rows(self, name: str) -> list[list] | None:
+        if not any(getattr(node, name) is not None for node in self.nodes):
+            return None
+        result = []
+        for node in self.nodes:
+            rows = getattr(node, name)
+            if rows is not None and len(rows) != sum(node.mask):
+                raise ValueError("Sampler head rows must match sampled node tokens")
+            i = 0
+            for sampled in node.mask:
+                result.append(rows[i] if sampled and rows is not None else [])
+                i += int(sampled)
+        return result
+
+    @property
+    def sampler_head_ids(self) -> list[list[int]] | None:
+        return self._sampler_head_rows("sampler_head_ids")
+
+    @property
+    def sampler_head_logprobs(self) -> list[list[float]] | None:
+        return self._sampler_head_rows("sampler_head_logprobs")
 
     @property
     def logprobs(self) -> list[float]:
