@@ -127,6 +127,8 @@ class MessageNode(BaseModel):
     `mask`: `mask` is "did the model sample this?" (assistant completion only); `is_content`
     is "is this caller/model body vs scaffold?" — meaningful on every role, so observation
     weighting (prime-rl `echo`) can train a tool/user message's *body* without its scaffold."""
+    sampler_head_ids: list[list[int]] | None = None
+    sampler_head_logprobs: list[list[float]] | None = None
     logprobs: list[float] = Field(default_factory=list)
     """Sampling logprobs for the sampled tokens — length equals the number of True entries in
     `mask`; empty for input messages."""
@@ -909,6 +911,8 @@ def _commit_turn(turn: PendingTurn, response: Response) -> int:
             else [],
             # TurnTokens is discarded after commit, so transfer its logprobs without copying.
             logprobs=tokens.completion_logprobs if tokens else [],
+            sampler_head_ids=tokens.sampler_head_ids if tokens else None,
+            sampler_head_logprobs=tokens.sampler_head_logprobs if tokens else None,
         )
     )
     # Register the assistant so the next turn's prompt (which restates it) reuses this node.
