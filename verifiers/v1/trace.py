@@ -8,7 +8,9 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Generic
 
 import numpy as np
+from renderers import packed_heads as ph
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, field_serializer
+from renderers from renderers import packed_heads as ph
 from renderers.base import MultiModalData
 from typing_extensions import TypeVar
 
@@ -253,26 +255,20 @@ class Branch(BaseModel):
                     out.append(0.0)
         return out
 
-    def _sampler_head_rows(self, name: str) -> list[list] | None:
+    def _sampler_head_rows(self, name: str) -> dict[str, bytes] | None:
         if not any(getattr(node, name) is not None for node in self.nodes):
             return None
-        result = []
-        for node in self.nodes:
-            rows = getattr(node, name)
-            if rows is not None and len(rows) != sum(node.mask):
-                raise ValueError("Sampler head rows must match sampled node tokens")
-            i = 0
-            for sampled in node.mask:
-                result.append(rows[i] if sampled and rows is not None else [])
-                i += int(sampled)
-        return result
+        dtype = np.int32 if name == "sampler_head_ids" else np.float32
+        return ph.concat(
+            [ph.align(getattr(node, name), node.mask, dtype) for node in self.nodes]
+        )
 
     @property
-    def sampler_head_ids(self) -> list[list[int]] | None:
+    def sampler_head_ids(self) -> dict[str, bytes] | None:
         return self._sampler_head_rows("sampler_head_ids")
 
     @property
-    def sampler_head_logprobs(self) -> list[list[float]] | None:
+    def sampler_head_logprobs(self) -> dict[str, bytes] | None:
         return self._sampler_head_rows("sampler_head_logprobs")
 
     @property

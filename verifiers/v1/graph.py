@@ -127,8 +127,8 @@ class MessageNode(BaseModel):
     `mask`: `mask` is "did the model sample this?" (assistant completion only); `is_content`
     is "is this caller/model body vs scaffold?" — meaningful on every role, so observation
     weighting (prime-rl `echo`) can train a tool/user message's *body* without its scaffold."""
-    sampler_head_ids: list[list[int]] | None = None
-    sampler_head_logprobs: list[list[float]] | None = None
+    sampler_head_ids: list[list[int]] | dict[str, bytes] | None = None
+    sampler_head_logprobs: list[list[float]] | dict[str, bytes] | None = None
     logprobs: list[float] = Field(default_factory=list)
     """Sampling logprobs for the sampled tokens — length equals the number of True entries in
     `mask`; empty for input messages."""
