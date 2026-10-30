@@ -8,8 +8,9 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Generic
 
 import numpy as np
-from pydantic import BaseModel, Field, PrivateAttr, computed_field, field_serializer
 from renderers import packed_heads as ph
+from pydantic import BaseModel, Field, PrivateAttr, computed_field, field_serializer
+from renderers from renderers import packed_heads as ph
 from renderers.base import MultiModalData
 from typing_extensions import TypeVar
 
