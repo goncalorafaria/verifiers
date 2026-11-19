@@ -21,6 +21,7 @@ from verifiers.v1.errors import (
 from verifiers.v1.harness import Harness, HarnessSession
 from verifiers.v1.interception import Interception, serve_interception
 from verifiers.v1.mcp import SharedToolServer, serve_tools
+from verifiers.v1.mcp.inprocess import open_inprocess_tools
 from verifiers.v1.runtimes import (
     ModalConfig,
     Runtime,
@@ -240,6 +241,24 @@ class Rollout:
                 await self.harness.setup(runtime)
             async with boundary(ToolsetError, "building tool servers"):
                 toolsets = self.task.toolsets(self.task.config)
+                direct_tools = [
+                    tool
+                    for tool in toolsets
+                    if getattr(tool.config, "transport", "mcp") == "inprocess"
+                ]
+                if direct_tools and (
+                    not runtime.is_local or not self.harness.SUPPORTS_INPROCESS_TOOLS
+                ):
+                    raise ToolsetError(
+                        "inprocess tools require a local runtime and a supporting harness"
+                    )
+                names = [tool.server_name for tool in toolsets]
+                if (
+                    len(set(names)) != len(names)
+                    or set(names) & self._shared_tools.keys()
+                ):
+                    raise ToolsetError("duplicate task/shared tool server name")
+                toolsets = [tool for tool in toolsets if tool not in direct_tools]
             # `base_url` is the interception server's reachable URL for this rollout.
             # The harness reaches the model at `{base_url}/v1`; tool servers reach this
             # rollout's `/state` + `/task` at `base_url` — it's universally reachable
@@ -259,6 +278,15 @@ class Rollout:
             )
             self._endpoint = runtime.host_url(f"{base_url.rstrip('/')}/v1")
             self._secret = model_secret
+            if direct_tools:
+                (
+                    self._session.inprocess_tool_schemas,
+                    self._session.inprocess_tools,
+                ) = await self._stack.enter_async_context(
+                    open_inprocess_tools(
+                        direct_tools, self.task.data, self.harness.config.tool_timeout
+                    )
+                )
             self._urls = await self._stack.enter_async_context(
                 serve_tools(
                     toolsets,
@@ -269,6 +297,8 @@ class Rollout:
                     state_base=base_url,
                 )
             )
+            if direct_tools:
+                self._stack.push_async_callback(self._session.close_inprocess)
             # Setup and service provisioning are complete. Apply the runtime's
             # execution policy while preserving the framework routes the agent uses.
             await runtime.prepare_execution([self._endpoint, *self._urls.values()])
@@ -327,6 +357,7 @@ class Rollout:
                         and (
                             self._session.request_interceptors
                             or self._session.request_stops
+                            or self._session.inprocess_tools
                         )
                         else {}
                     )

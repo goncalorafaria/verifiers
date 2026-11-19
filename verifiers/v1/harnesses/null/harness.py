@@ -17,6 +17,7 @@ class NullHarnessConfig(HarnessConfig):
 class NullHarness(Harness[NullHarnessConfig]):
     APPENDS_SYSTEM_PROMPT = True
     SUPPORTS_MCP = True
+    SUPPORTS_INPROCESS_TOOLS = True
     SUPPORTS_RESUME = True
     SUPPORTS_TOOL_INTERCEPTION = True
     EXECUTES_CODE = False
@@ -48,7 +49,12 @@ class NullHarness(Harness[NullHarnessConfig]):
             mcp_urls,
             system_prompt,
             prompt,
-            extra_args=[f"--tool-interception-url={tool_interception_url}"]
+            extra_args=[
+                f"--tool-interception-url={tool_interception_url}",
+                "--inprocess-tools-url="
+                + tool_interception_url.removesuffix("/tool")
+                + "/tools",
+            ]
             if tool_interception_url
             else (),
         )

@@ -96,6 +96,9 @@ def state_signature(secret: str, url: str, route: str) -> str:
 _call_state: contextvars.ContextVar[State | None] = contextvars.ContextVar(
     "vf_call_state", default=None
 )
+_direct_state: contextvars.ContextVar[State | None] = contextvars.ContextVar(
+    "vf_direct_state", default=None
+)
 _request_query_params: contextvars.ContextVar[dict[str, list[str]] | None] = (
     contextvars.ContextVar("vf_request_query_params", default=None)
 )
@@ -228,8 +231,13 @@ class ServerBase(Generic[ConfigT, StateT]):
         @functools.wraps(fn)
         async def wrapper(*args, **kwargs):
             # Base State has no fields and rejects extras, so only subclasses need channel sync.
-            sync_state = self._state_cls is not State
-            state = await self._pull_state() if sync_state else State()
+            direct = _direct_state.get()
+            sync_state = direct is None and self._state_cls is not State
+            state = (
+                direct
+                if direct is not None
+                else (await self._pull_state() if sync_state else State())
+            )
             token = _call_state.set(state)
             try:
                 before = self._state_adapter.dump_json(state) if sync_state else None
@@ -245,6 +253,17 @@ class ServerBase(Generic[ConfigT, StateT]):
         # MCPServer must advertise the wrapped tool's parameters, not `*args, **kwargs`.
         wrapper.__signature__ = inspect.signature(fn)  # type: ignore[attr-defined]
         return wrapper
+
+    @contextlib.contextmanager
+    def bind_state(self, state: State):
+        """Bind a direct call's private state without the HTTP state channel."""
+        direct_token = _direct_state.set(state)
+        call_token = _call_state.set(state)
+        try:
+            yield
+        finally:
+            _call_state.reset(call_token)
+            _direct_state.reset(direct_token)
 
     @property
     def server_name(self) -> str:

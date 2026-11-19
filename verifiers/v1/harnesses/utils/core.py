@@ -342,7 +342,7 @@ async def run_chat_loop(
                 decision = await gate_tool_call(
                     tool_client, args.tool_interception_url, args.api_key, call
                 )
-                if decision["action"] == "deny":
+                if decision["action"] in ("deny", "result"):
                     denied = bound_tool_message(decision["message"])
                     messages.append(denied)
                     tool_result_tokens += estimated_tokens(
@@ -398,6 +398,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initial-messages-file", default="")
     parser.add_argument("--mcp-config", default="")
     parser.add_argument("--tool-interception-url", default="")
+    parser.add_argument("--inprocess-tools-url", default="")
     parser.add_argument("--bash", action="store_true")
     parser.add_argument("--compaction", action="store_true")
     parser.add_argument("--summarize-at-tokens", type=int)
@@ -443,6 +444,20 @@ async def main() -> None:
         else:
             mcp_tools, dispatch, servers = [], {}, {}
         tools += mcp_tools
+        if args.inprocess_tools_url:
+            assert tool_client is not None
+            response = await tool_client.get(
+                args.inprocess_tools_url,
+                headers={"Authorization": f"Bearer {args.api_key}"},
+            )
+            response.raise_for_status()
+            names = reserved | set(dispatch)
+            for tool in response.json()["tools"]:
+                name = tool["function"]["name"]
+                if name in names:
+                    raise ValueError(f"duplicate tool name {name!r}")
+                names.add(name)
+                tools.append(tool)
         messages = (
             [{"role": "system", "content": args.system_prompt}]
             if args.system_prompt

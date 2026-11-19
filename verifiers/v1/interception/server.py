@@ -340,6 +340,7 @@ class InterceptionServer(Interception):
         app.router.add_get("/state", self.handle_state_get)
         app.router.add_put("/state", self.handle_state_put)
         app.router.add_post("/tool", self.handle_tool)
+        app.router.add_get("/tools", self.handle_tools)
         # A launched tool server fetches its rollout's task here to run `setup_task` — the task
         # is never passed via env, only over this channel, keyed by the state bearer.
         app.router.add_get("/task", self.handle_task_get)
@@ -397,6 +398,17 @@ class InterceptionServer(Interception):
                 ",".join(capabilities),
             )
         return mediated, capabilities
+
+    async def handle_tools(self, request: web.Request) -> web.Response:
+        """Discover direct tools using the rollout's existing model capability."""
+        session = self.sessions.get(
+            request.headers.get("Authorization", "").removeprefix("Bearer ")
+        )
+        if session is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if session.released:
+            return web.json_response({"error": "rollout concluded"}, status=409)
+        return web.json_response({"tools": session.inprocess_tool_schemas})
 
     async def handle_tool(self, request: web.Request) -> web.Response:
         """`POST /tool`: the harness's gate asks whether to run a tool call — its
