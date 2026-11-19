@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic_config import BaseConfig
 
@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 
 class ToolsetConfig(BaseConfig):
+    transport: Literal["mcp", "inprocess"] = "mcp"
+    """Run task-scoped tools over MCP, or directly in the local verifier worker."""
     colocated: bool = False
     runtime: RuntimeConfig = SubprocessConfig()
     url: str | None = None

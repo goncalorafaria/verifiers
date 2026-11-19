@@ -186,6 +186,10 @@ class RolloutSession:
     gated_tools: set[tuple[str, str]] = field(default_factory=set)
     """Calls the harness's gate asked about before executing."""
     prepared_users: Counter[str] = field(default_factory=Counter)
+    inprocess_tool_schemas: list[dict] = field(default_factory=list)
+    inprocess_tools: dict = field(default_factory=dict)
+    inprocess_results: dict[tuple[str, str], ToolMessage] = field(default_factory=dict)
+    inprocess_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @property
     def stopped(self) -> bool:
@@ -556,6 +560,27 @@ class RolloutSession:
             assert isinstance(verdict, ToolMessage)
             if verdict == probe:
                 verdict = None
+        if verdict is None and name in self.inprocess_tools:
+            if len(matches) != 1 or not same_arguments(matches[0][1], arguments):
+                raise HarnessError("in-process tool call must match a proposed call")
+            async with self.inprocess_lock:
+                if key not in self.inprocess_results:
+                    if self.released:
+                        raise HarnessError("rollout concluded before tool execution")
+                    content = await self.inprocess_tools[name].call(
+                        matches[0][1].arguments, self.trace
+                    )
+                    message = ToolMessage(
+                        tool_call_id=tool_call_id, name=name, content=content
+                    )
+                    self.inprocess_results[key] = message
+                    self.pinned_tool_results[key] = message
+                return {
+                    "action": "result",
+                    "message": self.inprocess_results[key].model_dump(
+                        exclude_none=True
+                    ),
+                }
         if verdict is None:
             return {"action": "allow"}
         return {"action": "deny", "message": verdict.model_dump(exclude_none=True)}
@@ -583,6 +608,16 @@ class RolloutSession:
         self.released = True
         for task in list(self.tasks):
             task.cancel()
+
+    async def close_inprocess(self) -> None:
+        """Drain direct handlers before their toolset resources are closed."""
+        pending = list(self.tasks)
+        self.release()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        self.inprocess_tools.clear()
+        self.inprocess_tool_schemas.clear()
+        self.inprocess_results.clear()
 
     async def refused(self) -> str | None:
         """The framework's limits (turns / token budget) and `@stop` checks, run before each

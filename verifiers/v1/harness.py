@@ -35,6 +35,8 @@ class Harness(ABC, Generic[ConfigT]):
     APPENDS_SYSTEM_PROMPT: ClassVar[bool] = False
     """Emit `TaskData.system_prompt` separately instead of folding it into the user prompt."""
     SUPPORTS_MCP: ClassVar[bool] = False
+    SUPPORTS_INPROCESS_TOOLS: ClassVar[bool] = False
+    """Whether the harness discovers worker-hosted tools and executes via its tool gate."""
     SUPPORTS_TOOL_INTERCEPTION: ClassVar[bool] = False
     """Whether the program asks the rollout's `/tool` gate (handed over as
     `tool_interception_url`) before executing each tool call, so a request hook can

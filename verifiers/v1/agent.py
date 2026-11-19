@@ -362,7 +362,12 @@ class Agent:
             # server was created; let the rollout size a scoped server instead.
             return None
         if self._server.tunnel is not None or (
-            run_is_local and not shared_tools and not task.toolsets(task.config)
+            run_is_local
+            and not shared_tools
+            and all(
+                getattr(tool.config, "transport", "mcp") == "inprocess"
+                for tool in task.toolsets(task.config)
+            )
         ):
             return self._server
         return None
