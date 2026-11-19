@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, PrivateAttr, computed_field, field_serial
 from renderers.base import MultiModalData
 from typing_extensions import TypeVar
 
+from verifiers.v1 import packed_heads as ph
+
 if TYPE_CHECKING:
     from verifiers.v1.judge import JudgeResponse
 
@@ -46,6 +48,8 @@ EXCLUDE_FIELDS: dict = {
             "multi_modal_data",
             "routed_experts",
             "sampling_mask",
+            "sampler_head_ids",
+            "sampler_head_logprobs",
         }
     }
 }
@@ -250,6 +254,22 @@ class Branch(BaseModel):
                 else:
                     out.append(0.0)
         return out
+
+    def _sampler_head_rows(self, name: str) -> dict[str, bytes] | None:
+        if not any(getattr(node, name) is not None for node in self.nodes):
+            return None
+        dtype = np.int32 if name == "sampler_head_ids" else np.float32
+        return ph.concat(
+            [ph.align(getattr(node, name), node.mask, dtype) for node in self.nodes]
+        )
+
+    @property
+    def sampler_head_ids(self) -> dict[str, bytes] | None:
+        return self._sampler_head_rows("sampler_head_ids")
+
+    @property
+    def sampler_head_logprobs(self) -> dict[str, bytes] | None:
+        return self._sampler_head_rows("sampler_head_logprobs")
 
     @property
     def logprobs(self) -> list[float]:

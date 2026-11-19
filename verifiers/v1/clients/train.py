@@ -161,6 +161,8 @@ def response_from_generate(
             prompt_ids=prompt_ids,
             completion_ids=completion_ids,
             completion_logprobs=result.get("completion_logprobs") or [],
+            sampler_head_ids=result.get("sampler_head_ids"),
+            sampler_head_logprobs=result.get("sampler_head_logprobs"),
             message_spans=message_spans,
             is_content=attribution.is_content if attribution is not None else None,
             multi_modal_data=result.get("multi_modal_data"),
