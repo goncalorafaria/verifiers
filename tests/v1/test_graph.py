@@ -563,3 +563,90 @@ def test_prompt_supplied_assistant_messages_are_not_sampled_turns():
     assert [n.sampled for n in trace.nodes] == [False, False, False, True]
     assert trace.num_turns == 1
     assert trace.assistant_messages == [response]
+
+
+def test_mc32_heads_survive_generation_tools_graph_and_wire():
+    """Keep all 32 draws (including duplicates), aligned past unsampled tool results."""
+    from types import SimpleNamespace
+
+    import msgpack
+
+    from verifiers.v1 import packed_heads as ph
+    from verifiers.v1.clients.train import response_from_generate
+
+    trace = vf.Trace(
+        agent=vf.AgentInfo(config=vf.AgentConfig()),
+        task=vf.TraceTask(type="Task", data=vf.TaskData(idx=0, prompt="x")),
+    )
+    user = vf.UserMessage(content="look up x")
+    ids = np.full((2, 32), 7, dtype=np.int32)
+    logps = np.full((2, 32), -1.25, dtype=np.float32)
+    packed_ids = ph.encode([32, 32], ids, np.int32, b"mc32")
+    packed_logps = ph.encode([32, 32], logps, np.float32, b"mc32")
+    first = response_from_generate(
+        {
+            "prompt_ids": [10, 11, 12],
+            "completion_ids": [20, 21],
+            "completion_logprobs": [-0.1, -0.2],
+            "sampler_head_ids": packed_ids,
+            "sampler_head_logprobs": packed_logps,
+            "tool_calls": [SimpleNamespace(id="call1", name="lookup", arguments="{}")],
+            "finish_reason": "tool_calls",
+        },
+        "test",
+    )
+    first.tokens.message_spans = [(0, 2)]
+    graph.prepare_turn(trace, [user]).commit(first)
+    tool = vf.ToolMessage(tool_call_id="call1", content="found")
+    second = response_from_generate(
+        {
+            "prompt_ids": [10, 11, 12, 20, 21, 30, 31],
+            "completion_ids": [40, 41],
+            "completion_logprobs": [-0.3, -0.4],
+            "content": "answer",
+            "sampler_head_ids": packed_ids,
+            "sampler_head_logprobs": packed_logps,
+            "finish_reason": "stop",
+        },
+        "test",
+    )
+    second.tokens.message_spans = [(0, 2), None, (5, 7)]
+    graph.prepare_turn(trace, [user, first.message, tool]).commit(second)
+
+    restored = vf.Trace.model_validate(
+        msgpack.unpackb(msgpack.packb(trace.model_dump()))
+    )
+    for candidate in (trace, restored):
+        branch = candidate.branches[-1]
+        expected = np.asarray(branch.sampled_mask, dtype=np.int32) * 32
+        for field, dtype, values in (
+            ("sampler_head_ids", np.int32, ids),
+            ("sampler_head_logprobs", np.float32, logps),
+        ):
+            payload = getattr(branch, field)
+            assert payload["mode"] == b"mc32"
+            counts, actual = ph.arrays(payload, dtype)
+            np.testing.assert_array_equal(counts, expected)
+            np.testing.assert_array_equal(actual, np.tile(values.ravel(), 2))
+        assert sum(branch.sampled_mask) == 4
+        assert [
+            x for x, sampled in zip(branch.logprobs, branch.sampled_mask) if sampled
+        ] == [-0.1, -0.2, -0.3, -0.4]
+
+
+def test_sampler_heads_remain_optional_and_reject_misalignment():
+    from verifiers.v1 import packed_heads as ph
+    from verifiers.v1.clients.train import response_from_generate
+
+    response = response_from_generate({"completion_ids": [1], "content": "x"}, "test")
+    assert response.tokens.sampler_head_ids is None
+    assert response.tokens.sampler_head_logprobs is None
+    with pytest.raises(ValueError, match="sampled node tokens"):
+        ph.align([[1, 2]], [True, True], np.int32)
+    with pytest.raises(ValueError, match="Cannot mix"):
+        ph.concat(
+            [
+                ph.encode([1], [1], np.int32),
+                ph.encode([32], [1] * 32, np.int32, b"mc32"),
+            ]
+        )
